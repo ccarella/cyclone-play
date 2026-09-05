@@ -1,11 +1,9 @@
 # Cyclone (playable preview)
 
-Public preview of [ccarella/cyclone](https://github.com/ccarella/cyclone) v0 (Tune AC v0.4 + QA clear-assist).
+Public preview of [ccarella/cyclone](https://github.com/ccarella/cyclone) v0 (Tune AC v0.4 + WebAudio level music).
 
-**Play (75s production):** https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/f756d4744beea45d219dd5a3fa0d4d176248dd99/index.html
+**Play:** https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/main/index.html
 
-**QA clear-assist (16s clock, production heat):** append `?qa=1`
+htmlpreview serves the inlined HTML/JS. It does **not** proxy `fetch()` of `.ogg`/`.mp3`. The game detects htmlpreview and loads beds from the public raw files in this repo (`assets/audio/music/level-N.ogg`, MP3 fallback).
 
-https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/f756d4744beea45d219dd5a3fa0d4d176248dd99/index.html?qa=1
-
-Hash fallback: https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/f756d4744beea45d219dd5a3fa0d4d176248dd99/index.html#qa=1
+**QA clear-assist (16s clock, production heat):** append `?qa=1` (hash fallback `#qa=1`) to hear L2/L3 crossfades without a full 75s clear.
