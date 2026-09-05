@@ -24,8 +24,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Stage static site
         run: |
-          mkdir _site
+          mkdir -p _site/assets/audio/music
           cp index.html styles.css game.js _site/
+          cp assets/audio/music/level-*.ogg assets/audio/music/level-*.mp3 _site/assets/audio/music/
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
         with:
