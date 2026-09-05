@@ -1,7 +1,7 @@
 # Cyclone (playable preview)
 
-Public preview of [ccarella/cyclone](https://github.com/ccarella/cyclone) v0 (Tune AC v0.2).
+Public preview of [ccarella/cyclone](https://github.com/ccarella/cyclone) v0 (Tune AC v0.3).
 
-**Play:** https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/bf7a89d1db9f67e699764c9db277c78fa22a462d/index.html
+**Play:** https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/41a05addf1b6703f53714af009c769a69da24ddd/index.html
 
 (Latest on main: https://htmlpreview.github.io/?https://github.com/ccarella/cyclone-play/blob/main/index.html)
