@@ -280,7 +280,25 @@
           /* try the next container */
         }
       }
-      return null;
+      try {
+        const specRes = await fetch(`${base}/level-${cue}.parts.json`);
+        if (!specRes.ok) return null;
+        const spec = await specRes.json();
+        const pieces = await Promise.all(
+          spec.parts.map(async (name) => {
+            const part = await fetch(`${base}/${name}`);
+            if (!part.ok) throw new Error("part");
+            return part.text();
+          })
+        );
+        const b64 = pieces.join("").replace(/\s+/g, "");
+        const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const buf = await decodeAudio(audioCtx, raw.buffer);
+        music.buffers[cue] = buf;
+        return buf;
+      } catch (_) {
+        return null;
+      }
     })();
     return music.loads[cue];
   }
