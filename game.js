@@ -10,6 +10,19 @@
   const DEATH_R = 24;
   const CONE_HALF = 0.38;
   const WAVE_S = 75;
+  // Tune AC v0.4: +25% opening vs v0.3 (11.2/15.4 * 1.25). First/early muls
+  // stay 0.94 so the first crawler is a clean +25% (13.16–18.10 vs 10.53–14.48).
+  const ENEMY_SPD_MIN = 14;
+  const ENEMY_SPD_MAX = 19.25;
+  const FIRST_ENEMY_SPD_MUL = 0.94;
+  const EARLY_SPD_MUL = 0.94;
+  const LATE_SPD_MUL = 2.25;
+  const SPD_RAMP_POW = 1.2;
+  const FIRST_EXTRA_SPAWN_S = 1.45;
+  const SPAWN_INTERVAL_EARLY = 1.05;
+  const SPAWN_INTERVAL_LATE = 0.28;
+  // Next level opens at this level's late mul: late / early ≈ 2.3936.
+  const LEVEL_CARRY_MUL = LATE_SPD_MUL / EARLY_SPD_MUL;
   const PAL = {
     bg: "#14081c",
     arena: "#1c0c28",
@@ -31,6 +44,8 @@
     mode: "title",
     t: 0,
     score: 0,
+    level: 1,
+    levelSpeedMul: 1,
     timeLeft: WAVE_S,
     spawnAcc: 0,
     pickupAcc: 0,
@@ -207,32 +222,51 @@
 
   function startCredit() {
     state.mode = "play";
-    state.t = 0;
     state.score = 0;
+    state.level = 1;
+    state.levelSpeedMul = 1;
+    beginWave(true);
+  }
+
+  function advanceLevel() {
+    state.level += 1;
+    state.levelSpeedMul *= LEVEL_CARRY_MUL;
+    beginWave(false);
+  }
+
+  function beginWave(freshCredit) {
+    state.t = 0;
     state.timeLeft = WAVE_S;
-    state.spawnAcc = 2.1;
+    state.spawnAcc = FIRST_EXTRA_SPAWN_S;
     state.pickupAcc = 2.4;
-    state.aim = -Math.PI / 2;
+    if (freshCredit) state.aim = -Math.PI / 2;
     state.enemies = [];
     state.pickups = [];
     state.gusts = [];
     state.fx = [];
     state.pops = [];
     state.shake = 0;
-    state.hintT = 5.2;
+    state.hintT = freshCredit ? 5.2 : 0;
     state.pulseCd = 0;
     state.gustCd = 0;
     state.endReason = "";
     resetSwirl();
-    spawnEnemy(-Math.PI / 2, 0.55);
+    const firstA = freshCredit ? -Math.PI / 2 : state.aim;
+    spawnEnemy(firstA, FIRST_ENEMY_SPD_MUL * state.levelSpeedMul);
     state.pickups.push({
-      a: Math.PI * 0.15,
+      a: freshCredit ? Math.PI * 0.15 : state.aim + Math.PI * 0.55,
       r: RING_R * 0.7,
       pulled: false,
       spin: 0,
     });
-    beep(220, 0.08, "square", 0.04);
-    beep(330, 0.12, "square", 0.04);
+    if (freshCredit) {
+      beep(220, 0.08, "square", 0.04);
+      beep(330, 0.12, "square", 0.04);
+    } else {
+      addPop(`LEVEL ${state.level}`, CX, CY - 36, PAL.gold);
+      beep(440, 0.1, "square", 0.05);
+      beep(660, 0.16, "square", 0.05);
+    }
   }
 
   function endCredit(reason) {
@@ -252,7 +286,7 @@
     state.enemies.push({
       a: angle ?? rand(0, Math.PI * 2),
       r: RING_R - 2,
-      spd: rand(7, 10) * (speedMul ?? 1),
+      spd: rand(ENEMY_SPD_MIN, ENEMY_SPD_MAX) * (speedMul ?? 1),
       flash: 0,
       wobble: rand(0, Math.PI * 2),
     });
@@ -335,12 +369,16 @@
     return 1 - state.timeLeft / WAVE_S;
   }
 
+  function rampK() {
+    return Math.pow(waveProgress(), SPD_RAMP_POW);
+  }
+
   function spawnInterval() {
-    return lerp(1.55, 0.58, waveProgress());
+    return lerp(SPAWN_INTERVAL_EARLY, SPAWN_INTERVAL_LATE, rampK());
   }
 
   function enemySpeedMul() {
-    return lerp(0.62, 1.15, waveProgress());
+    return state.levelSpeedMul * lerp(EARLY_SPD_MUL, LATE_SPD_MUL, rampK());
   }
 
   function updatePlay(dt) {
@@ -353,7 +391,7 @@
 
     if (state.timeLeft <= 0) {
       state.timeLeft = 0;
-      endCredit("clear");
+      advanceLevel();
       return;
     }
 
@@ -608,13 +646,14 @@
     drawText(`SCORE ${String(state.score).padStart(5, "0")}`, W / 2, 36, 2, PAL.white, "center");
     if (state.mode === "play") {
       const sec = Math.ceil(state.timeLeft);
-      drawText(`WAVE ${sec}S`, W / 2, 54, 2, PAL.magenta, "center");
+      drawText(`LEVEL ${state.level}`, W / 2, 54, 2, PAL.gold, "center");
+      drawText(`WAVE ${sec}S`, W / 2, 72, 2, PAL.magenta, "center");
       if (state.hintT > 0) {
         const fade = state.hintT > 1 ? 1 : state.hintT;
         const c = fade > 0.15 ? PAL.gold : PAL.ink;
-        drawText("DRAG RING TO AIM", W / 2, 78, 1, c, "center");
-        drawText("FLICK OR TAP MOUTH", W / 2, 90, 1, c, "center");
-        drawText("TAP EYE TO PULSE", W / 2, 102, 1, c, "center");
+        drawText("DRAG RING TO AIM", W / 2, 96, 1, c, "center");
+        drawText("FLICK OR TAP MOUTH", W / 2, 108, 1, c, "center");
+        drawText("TAP EYE TO PULSE", W / 2, 120, 1, c, "center");
       }
     }
   }
@@ -638,8 +677,9 @@
     drawEnemies();
     const title = state.endReason === "clear" ? "WAVE CLEAR" : "EYE HIT";
     drawText(title, W / 2, 86, 3, state.endReason === "clear" ? PAL.cyan : PAL.enemy, "center");
-    drawText("SCORE", W / 2, 126, 2, PAL.white, "center");
-    drawText(String(state.score).padStart(5, "0"), W / 2, 148, 4, PAL.gold, "center");
+    drawText(`LEVEL ${state.level}`, W / 2, 118, 2, PAL.gold, "center");
+    drawText("SCORE", W / 2, 142, 2, PAL.white, "center");
+    drawText(String(state.score).padStart(5, "0"), W / 2, 164, 4, PAL.gold, "center");
     drawText("TAP TO RESTART", W / 2, H - 48, 2, PAL.gold, "center");
   }
 
