@@ -8,7 +8,57 @@
 <meta name="theme-color" content="#14081c" />
 <title>CYCLONE</title>
 <style>
-:root {color-scheme: dark;--bg: #14081c;}* {box-sizing: border-box;-webkit-tap-highlight-color: transparent;}html,body {margin: 0;width: 100%;height: 100%;background: var(--bg);overflow: hidden;touch-action: none;user-select: none;-webkit-user-select: none;}body {min-height: 100dvh;display: flex;align-items: center;justify-content: center;padding: env(safe-area-inset-top) env(safe-area-inset-right)env(safe-area-inset-bottom) env(safe-area-inset-left);}#frame {width: 100%;height: 100%;display: flex;align-items: center;justify-content: center;}#game {display: block;width: auto;height: auto;max-width: 100%;max-height: 100%;image-rendering: pixelated;image-rendering: crisp-edges;background: #14081c;touch-action: none;}
+:root {
+  color-scheme: dark;
+  --bg: #14081c;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #14081c;
+  touch-action: none;
+}
+
 </style>
 </head>
 <body>
@@ -45,6 +95,9 @@
   const SPAWN_INTERVAL_LATE = 0.28;
   // Next level opens at this level's late mul: late / early ≈ 2.3936.
   const LEVEL_CARRY_MUL = LATE_SPD_MUL / EARLY_SPD_MUL;
+  const MUSIC_MAX_CUE = 3;
+  const MUSIC_FADE_S = 0.75;
+  const MUSIC_GAIN = 0.22;
   const PAL = {
     bg: "#14081c",
     arena: "#1c0c28",
@@ -98,6 +151,13 @@
   };
 
   let audioCtx = null;
+  const music = {
+    buffers: Object.create(null),
+    loads: Object.create(null),
+    current: null,
+    outgoing: null,
+    gen: 0,
+  };
 
   const GLYPH = {
     " ": "000000000000000",
@@ -214,6 +274,7 @@
       if (AC) audioCtx = new AC();
     }
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    preloadMusic();
   }
 
   function beep(freq, dur, type, gain) {
@@ -229,6 +290,167 @@
     g.connect(audioCtx.destination);
     o.start(t0);
     o.stop(t0 + dur);
+  }
+
+  function musicCue(level) {
+    return clamp(level | 0, 1, MUSIC_MAX_CUE);
+  }
+
+  function musicDir() {
+    const attr = document.documentElement.getAttribute("data-music-base");
+    if (attr) return attr.replace(/\/$/, "");
+    if (/htmlpreview\.github\.io$/i.test(location.hostname)) {
+      return "https://raw.githubusercontent.com/ccarella/cyclone-play/main/assets/audio/music";
+    }
+    return "assets/audio/music";
+  }
+
+  function decodeAudio(ctx, data) {
+    return new Promise((resolve, reject) => {
+      const copy = data.slice(0);
+      let settled = false;
+      const ok = (buf) => {
+        if (settled) return;
+        settled = true;
+        resolve(buf);
+      };
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err || new Error("decode failed"));
+      };
+      try {
+        const p = ctx.decodeAudioData(copy, ok, fail);
+        if (p && typeof p.then === "function") p.then(ok, fail);
+      } catch (err) {
+        fail(err);
+      }
+    });
+  }
+
+  function loadMusicCue(cue) {
+    if (music.buffers[cue]) return Promise.resolve(music.buffers[cue]);
+    if (music.loads[cue]) return music.loads[cue];
+    music.loads[cue] = (async () => {
+      if (!audioCtx) return null;
+      const base = musicDir();
+      const urls = [`${base}/level-${cue}.ogg`, `${base}/level-${cue}.mp3`];
+      for (const url of urls) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const buf = await decodeAudio(audioCtx, await res.arrayBuffer());
+          music.buffers[cue] = buf;
+          return buf;
+        } catch (_) {
+          /* try the next container */
+        }
+      }
+      return null;
+    })();
+    return music.loads[cue];
+  }
+
+  function preloadMusic() {
+    if (!audioCtx) return;
+    for (let cue = 1; cue <= MUSIC_MAX_CUE; cue++) loadMusicCue(cue);
+  }
+
+  function disconnectBed(bed) {
+    if (!bed) return;
+    try {
+      bed.source.onended = null;
+      bed.source.stop();
+    } catch (_) {}
+    try {
+      bed.source.disconnect();
+    } catch (_) {}
+    try {
+      bed.gain.disconnect();
+    } catch (_) {}
+  }
+
+  function makeBed(buffer, gainValue) {
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(gainValue, audioCtx.currentTime);
+    source.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start();
+    return { source, gain };
+  }
+
+  function scheduleStop(bed, when) {
+    const delay = Math.max(0, (when - audioCtx.currentTime) * 1000) + 24;
+    window.setTimeout(() => {
+      if (music.outgoing === bed) music.outgoing = null;
+      if (music.current === bed) return;
+      disconnectBed(bed);
+    }, delay);
+  }
+
+  function equalPowerCurves(from, to, steps) {
+    const fadeOut = new Float32Array(steps);
+    const fadeIn = new Float32Array(steps);
+    for (let i = 0; i < steps; i++) {
+      const x = i / (steps - 1);
+      fadeOut[i] = from * Math.cos((x * Math.PI) / 2);
+      fadeIn[i] = to * Math.sin((x * Math.PI) / 2);
+    }
+    fadeOut[steps - 1] = 0;
+    fadeIn[steps - 1] = to;
+    return { fadeOut, fadeIn };
+  }
+
+  function playLevelMusic(level) {
+    const cue = musicCue(level);
+    if (music.current && music.current.cue === cue) return;
+    const gen = ++music.gen;
+    loadMusicCue(cue).then((buf) => {
+      if (!buf || !audioCtx || gen !== music.gen) return;
+      if (music.current && music.current.cue === cue) return;
+      const t0 = audioCtx.currentTime;
+      const prev = music.current || music.outgoing;
+      if (!prev) {
+        music.current = { ...makeBed(buf, MUSIC_GAIN), cue };
+        music.outgoing = null;
+        return;
+      }
+      if (music.outgoing && music.outgoing !== prev) disconnectBed(music.outgoing);
+      const from = Math.max(0, prev.gain.gain.value);
+      const next = { ...makeBed(buf, 0), cue };
+      const { fadeOut, fadeIn } = equalPowerCurves(from, MUSIC_GAIN, 32);
+      prev.gain.gain.cancelScheduledValues(t0);
+      next.gain.gain.cancelScheduledValues(t0);
+      prev.gain.gain.setValueAtTime(from, t0);
+      next.gain.gain.setValueAtTime(0, t0);
+      prev.gain.gain.setValueCurveAtTime(fadeOut, t0, MUSIC_FADE_S);
+      next.gain.gain.setValueCurveAtTime(fadeIn, t0, MUSIC_FADE_S);
+      music.outgoing = prev;
+      music.current = next;
+      scheduleStop(prev, t0 + MUSIC_FADE_S);
+    });
+  }
+
+  function fadeOutMusic() {
+    music.gen += 1;
+    if (music.outgoing && music.outgoing !== music.current) {
+      disconnectBed(music.outgoing);
+      music.outgoing = null;
+    }
+    const bed = music.current;
+    music.current = null;
+    if (!bed || !audioCtx) return;
+    bed.cue = 0;
+    music.outgoing = bed;
+    const t0 = audioCtx.currentTime;
+    const from = Math.max(0.0001, bed.gain.gain.value);
+    bed.gain.gain.cancelScheduledValues(t0);
+    bed.gain.gain.setValueAtTime(from, t0);
+    bed.gain.gain.linearRampToValueAtTime(0, t0 + MUSIC_FADE_S);
+    scheduleStop(bed, t0 + MUSIC_FADE_S);
   }
 
   function drawGlyph(ch, x, y, scale, color) {
@@ -319,12 +541,14 @@
       beep(440, 0.1, "square", 0.05);
       beep(660, 0.16, "square", 0.05);
     }
+    playLevelMusic(state.level);
   }
 
   function endCredit(reason) {
     state.mode = "end";
     state.endReason = reason;
     state.shake = 6;
+    fadeOutMusic();
     if (reason === "death") {
       beep(90, 0.35, "sawtooth", 0.06);
     } else {
@@ -877,6 +1101,21 @@
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+
+  window.__cycloneMusic = {
+    play: playLevelMusic,
+    stop: fadeOutMusic,
+    cue: musicCue,
+    debug() {
+      return {
+        cue: music.current && music.current.cue,
+        outgoing: music.outgoing && music.outgoing.cue,
+        ctx: audioCtx && audioCtx.state,
+        buffers: Object.keys(music.buffers).map(Number),
+        dir: musicDir(),
+      };
+    },
+  };
 })();
 
 </script>
