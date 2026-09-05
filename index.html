@@ -22,7 +22,7 @@ body{min-height:100dvh;display:flex;align-items:center;justify-content:center;pa
 (() => {
   "use strict";
   const W = 270, H = 480, CX = 135, CY = 258, RING_R = 108, EYE_R = 16, DEATH_R = 24, CONE_HALF = 0.38, WAVE_S = 75;
-  const ENEMY_SPD_MIN = 5, ENEMY_SPD_MAX = 7.2, FIRST_ENEMY_SPD_MUL = 0.48, EARLY_SPD_MUL = 0.46, LATE_SPD_MUL = 1.18, FIRST_EXTRA_SPAWN_S = 3.6, SPAWN_INTERVAL_EARLY = 2.35, SPAWN_INTERVAL_LATE = 0.62;
+  const ENEMY_SPD_MIN = 6.6, ENEMY_SPD_MAX = 9.2, FIRST_ENEMY_SPD_MUL = 0.58, EARLY_SPD_MUL = 0.58, LATE_SPD_MUL = 1.72, SPD_RAMP_POW = 2.15, FIRST_EXTRA_SPAWN_S = 2.7, SPAWN_INTERVAL_EARLY = 1.85, SPAWN_INTERVAL_LATE = 0.46;
   const PAL = { bg: "#14081c", arena: "#1c0c28", ring: "#ff3cac", ringDim: "#6b184c", cyan: "#3cf3ff", cyanDim: "#17808a", magenta: "#ff3cac", enemy: "#ff4d6d", gold: "#ffd84a", white: "#f4f1e8", ink: "#0a0410" };
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -54,8 +54,9 @@ body{min-height:100dvh;display:flex;align-items:center;justify-content:center;pa
   function pulseEye() { if (state.pulseCd > 0) return; state.pulseCd = 0.8; addFx("pulse", { life: 0.4 }); state.shake = 3; beep(140, 0.12, "triangle", 0.05); beep(280, 0.08, "square", 0.03); for (const e of state.enemies) { e.r = clamp(e.r + 30, DEATH_R + 4, RING_R - 2); e.flash = 0.5; } for (const p of state.pickups) p.pulled = true; addPop(state.pickups.length ? "PULL" : "KNOCK", CX, CY - 28, state.pickups.length ? PAL.gold : PAL.white); }
   function collectPickup(p) { p.dead = true; state.score += 250; addPop("+250", CX, CY - 36, PAL.gold); addFx("burst", { a: 0, r: 8, color: PAL.gold, life: 0.3 }); beep(740, 0.08, "square", 0.05); beep(980, 0.1, "square", 0.04); }
   function waveProgress() { return 1 - state.timeLeft / WAVE_S; }
-  function spawnInterval() { return lerp(SPAWN_INTERVAL_EARLY, SPAWN_INTERVAL_LATE, waveProgress()); }
-  function enemySpeedMul() { return lerp(EARLY_SPD_MUL, LATE_SPD_MUL, waveProgress()); }
+  function rampK() { return Math.pow(waveProgress(), SPD_RAMP_POW); }
+  function spawnInterval() { return lerp(SPAWN_INTERVAL_EARLY, SPAWN_INTERVAL_LATE, rampK()); }
+  function enemySpeedMul() { return lerp(EARLY_SPD_MUL, LATE_SPD_MUL, rampK()); }
   function updatePlay(dt) { state.t += dt; state.timeLeft -= dt; state.hintT = Math.max(0, state.hintT - dt); state.pulseCd = Math.max(0, state.pulseCd - dt); state.gustCd = Math.max(0, state.gustCd - dt); state.shake *= Math.pow(0.04, dt); if (state.timeLeft <= 0) { state.timeLeft = 0; endCredit("clear"); return; } state.spawnAcc -= dt; if (state.spawnAcc <= 0) { spawnEnemy(undefined, enemySpeedMul()); state.spawnAcc = spawnInterval(); } state.pickupAcc -= dt; if (state.pickupAcc <= 0) { spawnPickup(); state.pickupAcc = rand(9, 14); } for (const s of state.swirl) s.a += s.s * dt; for (const e of state.enemies) { e.wobble += dt * 8; e.flash = Math.max(0, e.flash - dt * 5); if (!e.dead) { e.r -= e.spd * dt; if (e.r <= DEATH_R) { endCredit("death"); return; } } } for (const g of state.gusts) { g.r += 420 * dt; g.life -= dt; for (const e of state.enemies) { if (!e.dead && angDiff(e.a, g.a) <= CONE_HALF + 0.04 && Math.abs(e.r - g.r) < 16) hitEnemy(e); } } for (const p of state.pickups) { p.spin += dt * 6; if (p.pulled) { p.r -= 160 * dt; if (p.r <= EYE_R + 6) collectPickup(p); } } state.enemies = state.enemies.filter((e) => !e.dead || e.flash > 0); state.pickups = state.pickups.filter((p) => !p.dead); state.gusts = state.gusts.filter((g) => g.life > 0 && g.r < RING_R + 8); for (const f of state.fx) f.t += dt; state.fx = state.fx.filter((f) => f.t < f.life); for (const p of state.pops) p.t += dt; state.pops = state.pops.filter((p) => p.t < 1.05); }
   function update(dt) { if (state.mode === "play") updatePlay(dt); else state.shake *= Math.pow(0.04, dt); }
   function polar(a, r) { return [CX + Math.cos(a) * r, CY + Math.sin(a) * r]; }
