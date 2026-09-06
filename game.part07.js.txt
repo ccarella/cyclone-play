@@ -1,0 +1,146 @@
+Path();
+      ctx.arc(CX, CY, RING_R + 6, a0 + 0.08, a1 - 0.08);
+      ctx.stroke();
+      const chev = 4;
+      for (let i = 0; i < chev; i++) {
+        const t = (i + 0.5) / chev;
+        const a = a0 + t * (a1 - a0);
+        const inset = 10 + fill * 16;
+        const [x1, y1] = polar(a, RING_R - 4);
+        const [x2, y2] = polar(a, RING_R - inset);
+        ctx.strokeStyle = `rgba(255,77,109,${0.4 + 0.6 * fill})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+    if (b.phase === "windup_slam" || b.phase === "slam") {
+      const a0 = b.telA - b.telHalf;
+      const a1 = b.telA + b.telHalf;
+      const segs = 11;
+      const lit = Math.ceil(fill * segs);
+      for (let i = 0; i < segs; i++) {
+        const t0 = i / segs;
+        const t1 = (i + 0.72) / segs;
+        const on = i < lit;
+        ctx.strokeStyle = on
+          ? `rgba(255,216,74,${0.55 + 0.45 * fill})`
+          : "rgba(255,216,74,0.18)";
+        ctx.lineWidth = on ? 9 : 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, a0 + t0 * (a1 - a0), a0 + t1 * (a1 - a0));
+        ctx.stroke();
+        if (on) {
+          const mid = a0 + ((i + 0.36) / segs) * (a1 - a0);
+          const [x, y] = polar(mid, RING_R + 5);
+          ctx.fillStyle = PAL.white;
+          ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
+        }
+      }
+    }
+  }
+
+  function drawBoss() {
+    const b = state.boss;
+    if (!b) return;
+    const [x, y] = polar(b.a, b.r);
+    const j = Math.sin(b.wobble) * 1.4;
+    const winding = b.phase === "windup_lunge" || b.phase === "lunge";
+    const slamming = b.phase === "windup_slam" || b.phase === "slam";
+    const s = 9;
+    ctx.fillStyle = winding ? PAL.enemy : slamming ? PAL.gold : PAL.magenta;
+    ctx.globalAlpha = b.dead ? 0.35 : 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x + j), Math.round(y - s - 2));
+    ctx.lineTo(Math.round(x + s + 2 + j), Math.round(y));
+    ctx.lineTo(Math.round(x + j), Math.round(y + s + 2));
+    ctx.lineTo(Math.round(x - s - 2 + j), Math.round(y));
+    ctx.closePath();
+    ctx.fill();
+    if (!b.dead && iceCovers(b.a)) {
+      ctx.strokeStyle = PAL.ice;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.round(x - s - 3 + j), Math.round(y - s - 3), (s + 3) * 2, (s + 3) * 2);
+    }
+    ctx.fillStyle = b.flash > 0 || b.dead ? PAL.white : PAL.ink;
+    ctx.fillRect(Math.round(x - 3 + j), Math.round(y - 3), 6, 6);
+    ctx.fillStyle = b.flash > 0 ? PAL.white : winding ? PAL.enemy : slamming ? PAL.gold : PAL.cyan;
+    ctx.fillRect(Math.round(x - 1 + j), Math.round(y - 1), 3, 3);
+    if (!b.dead) {
+      const hpK = clamp(b.hp / b.maxHp, 0, 1);
+      ctx.strokeStyle = PAL.ink;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(x, y, s + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = hpK > 0.35 ? PAL.gold : PAL.enemy;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, s + 7, -Math.PI / 2, -Math.PI / 2 + hpK * Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (const sh of b.shards) {
+      const [sx, sy] = polar(sh.a, sh.r);
+      ctx.fillStyle = sh.dead || sh.flash > 0 ? PAL.white : PAL.gold;
+      ctx.fillRect(Math.round(sx) - 3, Math.round(sy) - 3, 6, 6);
+      ctx.fillStyle = PAL.white;
+      ctx.fillRect(Math.round(sx) - 1, Math.round(sy) - 1, 2, 2);
+    }
+  }
+
+  function drawWedges() {
+    const hot = pipOnTarget();
+    const pulse = hotPulse();
+    const onWedge = angDiff(state.pipA, state.wedgeA) <= WEDGE_HALF;
+    if (hot && onWedge) {
+      ctx.strokeStyle = `rgba(255,216,74,${0.28 + 0.42 * pulse})`;
+      ctx.lineWidth = 18;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,230,1)";
+      ctx.lineWidth = 11;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+      ctx.strokeStyle = PAL.gold;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = "rgba(255,216,74,0.55)";
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = PAL.white;
+    ctx.lineWidth = hot && onWedge ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R + 4, state.wedgeA - WEDGE_HALF * 0.7, state.wedgeA + WEDGE_HALF * 0.7);
+    ctx.stroke();
+
+    const rimMarks = state.enemies.filter((e) => !e.dead);
+    if (state.boss && !state.boss.dead) rimMarks.push(state.boss);
+    for (const e of rimMarks) {
+      const on = angDiff(state.pipA, e.a) <= PIP_HIT;
+      if (on) {
+        ctx.strokeStyle = `rgba(255,77,109,${0.5 + 0.5 * pulse})`;
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255,230,236,1)";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "rgba(255,77,109,0.42)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);

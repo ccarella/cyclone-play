@@ -1,0 +1,156 @@
+ {
+      const [x, y] = polar(p.a, p.r);
+      ctx.save();
+      ctx.translate(Math.round(x), Math.round(y));
+      ctx.rotate(p.spin);
+      ctx.fillStyle = PAL.gold;
+      ctx.fillRect(-3, -3, 6, 6);
+      ctx.fillStyle = PAL.white;
+      ctx.fillRect(-1, -4, 2, 8);
+      ctx.fillRect(-4, -1, 8, 2);
+      ctx.restore();
+    }
+  }
+
+  function drawGusts() {
+    for (const g of state.gusts) {
+      ctx.strokeStyle = PAL.cyan;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(CX, CY, g.r, g.a - CONE_HALF, g.a + CONE_HALF);
+      ctx.stroke();
+      ctx.strokeStyle = PAL.white;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(CX, CY, g.r + 3, g.a - CONE_HALF * 0.7, g.a + CONE_HALF * 0.7);
+      ctx.stroke();
+    }
+  }
+
+  function drawFx() {
+    for (const f of state.fx) {
+      const k = 1 - f.t / f.life;
+      if (f.kind === "pulse") {
+        ctx.strokeStyle = `rgba(60,243,255,${0.7 * k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 8 + f.t * 180, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.kind === "slash") {
+        ctx.strokeStyle = `rgba(244,241,232,${k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(CX, CY, 46, f.a - CONE_HALF, f.a + CONE_HALF);
+        ctx.stroke();
+      } else if (f.kind === "burst") {
+        const [x, y] = polar(f.a, f.r);
+        ctx.fillStyle = f.color;
+        for (let i = 0; i < 6; i++) {
+          const aa = (i / 6) * Math.PI * 2;
+          ctx.fillRect(
+            Math.round(x + Math.cos(aa) * (10 * (1 - k))),
+            Math.round(y + Math.sin(aa) * (10 * (1 - k))),
+            2,
+            2
+          );
+        }
+      } else if (f.kind === "pip") {
+        const [x, y] = polar(f.a, f.r);
+        ctx.strokeStyle = `rgba(255,216,74,${k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, 6 + f.t * 42, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.kind === "stutter") {
+        ctx.strokeStyle = `rgba(255,77,109,${0.8 * k})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R - 10, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.kind === "freeze") {
+        const a0 = f.a - (f.half ?? ICE_HALF);
+        const a1 = f.a + (f.half ?? ICE_HALF);
+        ctx.strokeStyle = `rgba(158,246,255,${0.95 * k})`;
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R - 2, a0, a1);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(244,255,255,${k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 16 + f.t * 160, a0, a1);
+        ctx.stroke();
+      } else if (f.kind === "twister") {
+        const a0 = f.a - TWISTER_CONE;
+        const a1 = f.a + TWISTER_CONE;
+        ctx.fillStyle = `rgba(255,216,74,${0.16 * k})`;
+        ctx.beginPath();
+        ctx.moveTo(CX, CY);
+        ctx.arc(CX, CY, RING_R + 4, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255,216,74,${0.95 * k})`;
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 14 + f.t * 240, a0, a1);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(244,241,232,${k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 28 + f.t * 200, a0 + 0.12, a1 - 0.12);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255,60,172,${0.7 * k})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R - 6, a0, a1);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawHud() {
+    drawText("CYCLONE", W / 2, 14, 3, PAL.cyan, "center");
+    drawText(`SCORE ${String(state.score).padStart(5, "0")}`, W / 2, 36, 2, PAL.white, "center");
+    if (state.mode === "play") {
+      const sec = Math.ceil(state.timeLeft);
+      drawText(`LEVEL ${state.level}`, W / 2, 54, 2, PAL.gold, "center");
+      if (state.boss) {
+        const hp = state.boss.dead ? 0 : Math.max(0, state.boss.hp);
+        drawText(`BOSS ${hp}/${state.boss.maxHp}`, W / 2, 72, 2, PAL.enemy, "center");
+      } else {
+        drawText(`WAVE ${sec}S`, W / 2, 72, 2, PAL.magenta, "center");
+      }
+      let qaY = 90;
+      if (state.steal === STEAL_ID) {
+        drawText(STEAL_NAME, W / 2, qaY, 1, PAL.ice, "center");
+        qaY += 12;
+      }
+      if (qaAssist) {
+        const left = levelsToBoss(state.level);
+        const qa = left === 0 ? "QA BOSS" : `QA ASSIST BOSS IN ${left}`;
+        drawText(qa, W / 2, qaY, 1, PAL.gold, "center");
+        qaY += 12;
+      }
+      if (state.hintT > 0) {
+        const fade = state.hintT > 1 ? 1 : state.hintT;
+        const c = fade > 0.15 ? PAL.gold : PAL.ink;
+        const hy = qaY;
+        drawText("DRAG RING TO AIM", W / 2, hy, 1, c, "center");
+        drawText("FLICK OR TAP MOUTH", W / 2, hy + 12, 1, c, "center");
+        drawText("TAP EYE TO PULSE", W / 2, hy + 24, 1, c, "center");
+        drawText("HOLD EYE TO CHARGE", W / 2, hy + 36, 1, c, "center");
+        drawText("TAP WITH THE PIP", W / 2, hy + 48, 1, c, "center");
+      }
+    }
+  }
+
+  function drawTitle() {
+    drawArena();
+    drawCone();
+    drawEye();
+    drawText("CYCLONE", W / 2, 56, 4, PAL.cyan, "center");
+    drawText("EYE OF THE STORM", W / 2, 86, 2, PAL.magenta, "center");
+    drawText("DRAG RING TO AIM", W / 2, 118, 2, PAL.white, "center");
+    drawText("FLICK OR TAP MOUTH", W / 2, 138, 2, PAL.white, "center");
+    drawText("TAP EYE TO PULSE", W / 2, 158, 2, PAL.white, "center");
+    drawText("HOL

@@ -1,0 +1,191 @@
+ALE : dt;
+    state.t += stormDt;
+    state.timeLeft -= stormDt;
+    state.hintT = Math.max(0, state.hintT - stormDt);
+    state.pulseCd = Math.max(0, state.pulseCd - stormDt);
+    state.gustCd = Math.max(0, state.gustCd - stormDt);
+    state.chargeCd = Math.max(0, state.chargeCd - stormDt);
+    state.chargeFlash = Math.max(0, state.chargeFlash - dt * 2.4);
+    state.shake *= Math.pow(0.04, stormDt);
+    tickCharge(dt);
+
+    if (state.ice) {
+      state.ice.t += stormDt;
+      if (state.ice.t >= state.ice.life) state.ice = null;
+    }
+
+    if (state.boss) {
+      updateBoss(stormDt);
+      if (state.mode !== "play") return;
+      if (state.boss.dead && state.boss.clearT <= 0) {
+        advanceLevel();
+        return;
+      }
+    } else {
+      if (state.timeLeft <= 0) {
+        state.timeLeft = 0;
+        advanceLevel();
+        return;
+      }
+
+      state.spawnAcc -= stormDt;
+      if (state.spawnAcc <= 0) {
+        spawnEnemy(undefined, enemySpeedMul());
+        state.spawnAcc = spawnInterval();
+      }
+
+      state.pickupAcc -= stormDt;
+      if (state.pickupAcc <= 0) {
+        spawnPickup();
+        state.pickupAcc = rand(9, 14);
+      }
+    }
+
+    const swirlMul = chargeReady() ? CHARGE_SWIRL_MUL : 1;
+    for (const s of state.swirl) {
+      s.a += s.s * stormDt * swirlMul;
+    }
+
+    for (const e of state.enemies) {
+      e.wobble += stormDt * 8;
+      e.flash = Math.max(0, e.flash - stormDt * 5);
+      if (!e.dead) {
+        if (!iceCovers(e.a)) e.r -= e.spd * stormDt;
+        if (e.r <= DEATH_R) {
+          endCredit("death");
+          return;
+        }
+      }
+    }
+
+    for (const g of state.gusts) {
+      g.r += 420 * stormDt;
+      g.life -= stormDt;
+      for (const e of state.enemies) {
+        if (e.dead) continue;
+        if (angDiff(e.a, g.a) <= CONE_HALF + 0.04 && Math.abs(e.r - g.r) < 16) {
+          hitEnemy(e);
+        }
+      }
+    }
+
+    for (const p of state.pickups) {
+      p.spin += stormDt * 6;
+      if (p.pulled) {
+        p.r -= 160 * stormDt;
+        if (p.r <= EYE_R + 6) collectPickup(p);
+      }
+    }
+
+    state.enemies = state.enemies.filter((e) => !e.dead || e.flash > 0);
+    state.pickups = state.pickups.filter((p) => !p.dead);
+    state.gusts = state.gusts.filter((g) => g.life > 0 && g.r < RING_R + 8);
+
+    for (const f of state.fx) f.t += stormDt;
+    state.fx = state.fx.filter((f) => f.t < f.life);
+    for (const p of state.pops) p.t += dt;
+    state.pops = state.pops.filter((p) => p.t < (p.life ?? 1.05));
+  }
+
+  function update(dt) {
+    if (state.mode === "play") updatePlay(dt);
+    else state.shake *= Math.pow(0.04, dt);
+  }
+
+  function polar(a, r) {
+    return [CX + Math.cos(a) * r, CY + Math.sin(a) * r];
+  }
+
+  function drawArena() {
+    ctx.fillStyle = PAL.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = PAL.arena;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R + 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = PAL.ink;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R + 5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = PAL.ringDim;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = PAL.ring;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = PAL.ringDim;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const [x1, y1] = polar(a, RING_R - 5);
+      const [x2, y2] = polar(a, RING_R + 3);
+      ctx.fillRect(Math.round(x1), Math.round(y1), 2, 2);
+      ctx.fillRect(Math.round(x2), Math.round(y2), 2, 2);
+    }
+
+    if (state.stutterT > 0) {
+      const k = state.stutterT / STUTTER_S;
+      ctx.strokeStyle = `rgba(255,77,109,${0.55 * k})`;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function drawIce() {
+    const ice = state.ice;
+    if (!ice) return;
+    const left = 1 - ice.t / ice.life;
+    const a0 = ice.a - ice.half;
+    const a1 = ice.a + ice.half;
+    ctx.strokeStyle = `rgba(158,246,255,${0.35 + 0.45 * left})`;
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R, a0, a1);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(244,255,255,${0.75 * left})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R, a0 + 0.06, a1 - 0.06);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(158,246,255,${0.08 * left})`;
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.arc(CX, CY, RING_R - 2, a0, a1);
+    ctx.closePath();
+    ctx.fill();
+    const ticks = 7;
+    for (let i = 0; i < ticks; i++) {
+      const a = a0 + ((i + 0.5) / ticks) * (a1 - a0);
+      const [x, y] = polar(a, RING_R - 8);
+      ctx.fillStyle = `rgba(158,246,255,${0.7 * left})`;
+      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+    }
+  }
+
+  function drawBossTel() {
+    const b = state.boss;
+    if (!b || b.dead) return;
+    const fill = b.telFill;
+    if (b.phase === "windup_lunge" || b.phase === "lunge") {
+      const pulse = 0.45 + 0.55 * Math.sin(performance.now() / 70);
+      const a0 = b.telA - b.telHalf;
+      const a1 = b.telA + b.telHalf;
+      ctx.strokeStyle = `rgba(255,77,109,${0.25 + 0.7 * fill})`;
+      ctx.lineWidth = 8 + fill * 10;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, a0, a1);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,230,236,${0.35 + 0.65 * fill * pulse})`;
+      ctx.lineWidth = 3;
+      ctx.begin
