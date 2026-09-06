@@ -193,3 +193,11 @@
     "/": "001001010100100",
     "-": "000000111000000",
   };
+
+  function resize() {
+    const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    const scale = Math.min(vw / W, vh / H);
+    canvas.style.width = `${Math.floor(W * scale)}px`;
+    canvas.style.height = `${Math.floor(H * scale)}px`;
+  }
