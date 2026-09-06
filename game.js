@@ -188,7 +188,7 @@
     return v === "1" || v === "true" || v === "on" || v === "yes";
   }
 
-  function readQaAnt() {
+  function readQaAssist() {
     if (QA_ASSIST) return true;
     const search = window.location.search || "";
     const hash = (window.location.hash || "").replace(/^#/, "");
