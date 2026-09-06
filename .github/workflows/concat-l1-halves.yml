@@ -1,0 +1,46 @@
+name: Concat L1 part halves
+
+on:
+  push:
+    paths:
+      - "assets/audio/music/_chunks/**"
+      - ".github/workflows/concat-l1-halves.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  concat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Concatenate uploaded halves
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          root = Path("assets/audio/music")
+          chunks = root / "_chunks"
+          for i in range(7, 13):
+              name = f"level-1.ogg.p{i:02d}"
+              a = chunks / f"{name}.a"
+              b = chunks / f"{name}.b"
+              if a.exists() and b.exists():
+                  data = a.read_bytes() + b.read_bytes()
+                  out = root / name
+                  out.write_bytes(data)
+                  print(f"wrote {out} {len(data)}")
+              else:
+                  print(f"skip {name} missing half")
+          PY
+      - name: Commit complete parts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/audio/music/level-1.ogg.p07 assets/audio/music/level-1.ogg.p08 assets/audio/music/level-1.ogg.p09 assets/audio/music/level-1.ogg.p10 assets/audio/music/level-1.ogg.p11 assets/audio/music/level-1.ogg.p12 || true
+          if git diff --cached --quiet; then
+            echo "no complete parts to commit"
+          else
+            git commit -m "Add complete L1 OGG parts p07-p12"
+            git push
+          fi
