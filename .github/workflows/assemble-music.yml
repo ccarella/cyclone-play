@@ -1,0 +1,47 @@
+name: Assemble music beds
+
+on:
+  push:
+    paths:
+      - "assets/audio/music/*.parts.json"
+      - "assets/audio/music/*.p*"
+      - ".github/workflows/assemble-music.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble OGG beds from base64 parts
+        run: |
+          python3 << 'PY'
+          import base64
+          import json
+          from pathlib import Path
+
+          root = Path("assets/audio/music")
+          for spec_path in sorted(root.glob("level-*.parts.json")):
+              spec = json.loads(spec_path.read_text())
+              b64 = "".join((root / name).read_text().strip() for name in spec["parts"])
+              data = base64.b64decode(b64)
+              out = root / (spec_path.name.replace(".parts.json", ".ogg"))
+              if len(data) != spec["bytes"]:
+                  raise SystemExit(f"{out} size {len(data)} != {spec['bytes']}")
+              out.write_bytes(data)
+              print(f"wrote {out} {len(data)} bytes")
+          PY
+      - name: Commit assembled OGG files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/audio/music/level-*.ogg
+          if git diff --cached --quiet; then
+            echo "no assembled change"
+          else
+            git commit -m "Assemble L1–L3 OGG beds from uploaded parts"
+            git push
+          fi
