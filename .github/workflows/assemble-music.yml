@@ -4,7 +4,8 @@ on:
   push:
     paths:
       - "assets/audio/music/*.parts.json"
-      - "assets/audio/music/*.p*"
+      - "assets/audio/music/*.p0*"
+      - "assets/audio/music/*.p1*"
       - ".github/workflows/assemble-music.yml"
   workflow_dispatch:
 
@@ -26,6 +27,10 @@ jobs:
           root = Path("assets/audio/music")
           for spec_path in sorted(root.glob("level-*.parts.json")):
               spec = json.loads(spec_path.read_text())
+              missing = [name for name in spec["parts"] if not (root / name).is_file()]
+              if missing:
+                  print(f"skip {spec_path.name}: missing {missing}")
+                  continue
               b64 = "".join((root / name).read_text().strip() for name in spec["parts"])
               data = base64.b64decode(b64)
               out = root / (spec_path.name.replace(".parts.json", ".ogg"))
