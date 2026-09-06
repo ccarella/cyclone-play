@@ -1,0 +1,194 @@
+dit ? 5.2 : 0;
+    state.pulseCd = 0;
+    state.gustCd = 0;
+    state.stopT = 0;
+    state.stutterT = 0;
+    state.missLockT = 0;
+    state.pipFlash = 0;
+    cancelCharge();
+    state.chargeCd = 0;
+    state.chargeFlash = 0;
+    state.boss = null;
+    state.ice = null;
+    state.endReason = "";
+    resetSwirl();
+    if (isBossLevel(state.level)) {
+      startBossEncounter(freshCredit);
+      playLevelMusic(state.level);
+      if (input.down && input.fromEye && state.chargeCd <= 0) {
+        input.charging = true;
+        state.chargeT = 0;
+      }
+      return;
+    }
+    const firstA = freshCredit ? -Math.PI / 2 : state.aim;
+    if (freshCredit) {
+      state.pipA = firstA;
+      state.wedgeA = firstA + Math.PI;
+      // Opening beat: sit on the first crawler so a first mouth-tap
+      // can still be a perfect, then race continuously.
+      state.stopT = 0.48;
+      state.pipFlash = 0.7;
+    }
+    spawnEnemy(firstA, FIRST_ENEMY_SPD_MUL * state.levelSpeedMul);
+    state.pickups.push({
+      a: freshCredit ? Math.PI * 0.15 : state.aim + Math.PI * 0.55,
+      r: RING_R * 0.7,
+      pulled: false,
+      spin: 0,
+    });
+    if (freshCredit) {
+      beep(220, 0.08, "square", 0.04);
+      beep(330, 0.12, "square", 0.04);
+    } else {
+      addPop(`LEVEL ${state.level}`, CX, CY - 36, PAL.gold);
+      beep(440, 0.1, "square", 0.05);
+      beep(660, 0.16, "square", 0.05);
+    }
+    playLevelMusic(state.level);
+    if (input.down && input.fromEye && state.chargeCd <= 0) {
+      input.charging = true;
+      state.chargeT = 0;
+    }
+  }
+
+  function endCredit(reason) {
+    cancelCharge();
+    state.mode = "end";
+    state.endReason = reason;
+    state.shake = 6;
+    fadeOutMusic();
+    if (reason === "death") {
+      beep(90, 0.35, "sawtooth", 0.06);
+    } else {
+      beep(440, 0.1, "square", 0.05);
+      beep(660, 0.18, "square", 0.05);
+    }
+  }
+
+  function spawnEnemy(angle, speedMul) {
+    if (state.enemies.length >= 14) return;
+    state.enemies.push({
+      a: angle ?? rand(0, Math.PI * 2),
+      r: RING_R - 2,
+      spd: rand(ENEMY_SPD_MIN, ENEMY_SPD_MAX) * (speedMul ?? 1),
+      flash: 0,
+      wobble: rand(0, Math.PI * 2),
+    });
+  }
+
+  function spawnPickup() {
+    if (state.pickups.length) return;
+    state.pickups.push({
+      a: rand(0, Math.PI * 2),
+      r: rand(RING_R * 0.58, RING_R * 0.82),
+      pulled: false,
+      spin: 0,
+    });
+  }
+
+  function fireGust() {
+    if (state.mode !== "play") return;
+    if (state.gustCd > 0) return;
+    const pipHit = pipOnTarget();
+    state.gustCd = 0.22;
+    state.gusts.push({
+      a: state.aim,
+      r: EYE_R + 10,
+      life: 0.42,
+    });
+    addFx("slash", { a: state.aim, life: 0.18 });
+    beep(520, 0.07, "square", 0.045);
+    beep(180, 0.1, "triangle", 0.03);
+    sliceCone();
+    if (state.boss && !state.boss.dead && angDiff(state.boss.a, state.aim) <= CONE_HALF + 0.12) {
+      hitBoss(1, 8);
+    }
+    sliceShards(state.aim, CONE_HALF + 0.12);
+    if (state.steal === STEAL_ID) applyFreezeSpin();
+    if (pipHit) perfectStop();
+    else stormStutter();
+  }
+
+  function sliceCone() {
+    for (const e of state.enemies) {
+      if (angDiff(e.a, state.aim) <= CONE_HALF + 0.12 && e.r > EYE_R + 4) {
+        hitEnemy(e);
+      }
+    }
+  }
+
+  function hitEnemy(e) {
+    if (e.dead) return;
+    e.dead = true;
+    e.flash = 1;
+    state.score += 100;
+    addPop("+100", CX + Math.cos(e.a) * e.r * 0.72, CY + Math.sin(e.a) * e.r * 0.72 - 8, PAL.cyan);
+    addFx("burst", { a: e.a, r: e.r, color: PAL.cyan, life: 0.28 });
+    state.shake = Math.max(state.shake, 2.4);
+    beep(880, 0.05, "square", 0.04);
+  }
+
+  function pulseEye() {
+    if (state.mode !== "play") return;
+    if (state.pulseCd > 0) return;
+    const pipHit = pipOnTarget();
+    state.pulseCd = 0.8;
+    addFx("pulse", { life: 0.4 });
+    state.shake = 3;
+    beep(140, 0.12, "triangle", 0.05);
+    beep(280, 0.08, "square", 0.03);
+    for (const e of state.enemies) {
+      e.r = clamp(e.r + 30, DEATH_R + 4, RING_R - 2);
+      e.flash = 0.5;
+    }
+    if (state.boss && !state.boss.dead) hitBoss(1, 28);
+    knockShards(26);
+    for (const p of state.pickups) {
+      p.pulled = true;
+    }
+    if (state.pickups.length) {
+      addPop("PULL", CX, CY - 28, PAL.gold);
+    } else {
+      addPop("KNOCK", CX, CY - 28, PAL.white);
+    }
+    if (pipHit) perfectStop();
+    else stormStutter();
+  }
+
+  function collectPickup(p) {
+    p.dead = true;
+    state.score += 250;
+    addPop("+250", CX, CY - 36, PAL.gold);
+    addFx("burst", { a: 0, r: 8, color: PAL.gold, life: 0.3 });
+    beep(740, 0.08, "square", 0.05);
+    beep(980, 0.1, "square", 0.04);
+  }
+
+  function waveProgress() {
+    // Ramp is always vs production WAVE_S so QA does not compress heat.
+    const elapsed = waveLen() - state.timeLeft;
+    return clamp(elapsed / WAVE_S, 0, 1);
+  }
+
+  function rampK() {
+    return Math.pow(waveProgress(), SPD_RAMP_POW);
+  }
+
+  function spawnInterval() {
+    return lerp(SPAWN_INTERVAL_EARLY, SPAWN_INTERVAL_LATE, rampK());
+  }
+
+  function enemySpeedMul() {
+    return state.levelSpeedMul * lerp(EARLY_SPD_MUL, LATE_SPD_MUL, rampK());
+  }
+
+  function updatePlay(dt) {
+    state.stopT = Math.max(0, state.stopT - dt);
+    state.stutterT = Math.max(0, state.stutterT - dt);
+    state.missLockT = Math.max(0, state.missLockT - dt);
+    state.pipFlash = Math.max(0, state.pipFlash - dt * 3.2);
+    if (state.stopT <= 0) state.pipA += PIP_SPD * dt;
+    state.wedgeA += WEDGE_SPD * dt;
+
+    const stormDt = state.stutterT > 0 ? dt * STUTTER_SC

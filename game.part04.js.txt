@@ -1,0 +1,193 @@
+ 2,
+        r: RING_R - 2,
+        spd: SLAM_SPD + i * 1.4,
+        dead: false,
+        flash: 0,
+      });
+    }
+    beep(90, 0.16, "sawtooth", 0.055);
+    beep(320, 0.1, "square", 0.035);
+  }
+
+  function sliceShards(aim, half) {
+    const b = state.boss;
+    if (!b) return;
+    for (const s of b.shards) {
+      if (s.dead) continue;
+      if (angDiff(s.a, aim) <= half) {
+        s.dead = true;
+        s.flash = 1;
+        addFx("burst", { a: s.a, r: s.r, color: PAL.gold, life: 0.22 });
+      }
+    }
+  }
+
+  function knockShards(amt) {
+    const b = state.boss;
+    if (!b) return;
+    for (const s of b.shards) {
+      if (s.dead) continue;
+      s.r = clamp(s.r + amt, DEATH_R + 4, RING_R - 2);
+    }
+  }
+
+  function hitBoss(dmg, knock) {
+    const b = state.boss;
+    if (!b || b.dead) return false;
+    b.hp -= dmg;
+    b.flash = 1;
+    state.score += BOSS_CHIP;
+    const [x, y] = polar(b.a, b.r * 0.78);
+    addPop(`+${BOSS_CHIP}`, x, y - 8, PAL.cyan);
+    addFx("burst", { a: b.a, r: b.r, color: PAL.gold, life: 0.28 });
+    state.shake = Math.max(state.shake, 3.2);
+    beep(200, 0.06, "sawtooth", 0.04);
+    beep(640, 0.05, "square", 0.04);
+    if (knock) b.r = clamp(b.r + knock, DEATH_R + 4, RING_R - 2);
+    if (b.phase !== "orbit" && b.phase !== "slam") enterOrbit(b, 0.72);
+    if (b.hp <= 0) {
+      killBoss();
+    }
+    return true;
+  }
+
+  function killBoss() {
+    const b = state.boss;
+    if (!b || b.dead) return;
+    b.dead = true;
+    b.hp = 0;
+    b.phase = "dead";
+    b.clearT = BOSS_CLEAR_S;
+    b.shards = [];
+    state.score += BOSS_KILL;
+    addPop(`+${BOSS_KILL}`, CX, CY - 70, PAL.gold, { scale: 3, life: 1.2 });
+    addPop("RIM WRAITH", CX, CY - 8, PAL.white, { scale: 2, life: 1.2 });
+    addFx("burst", { a: b.a, r: b.r, color: PAL.gold, life: 0.5 });
+    addFx("twister", { a: b.a, life: 0.36 });
+    state.shake = Math.max(state.shake, 7.5);
+    grantSteal();
+    beep(330, 0.1, "square", 0.05);
+    beep(495, 0.12, "square", 0.05);
+    beep(660, 0.2, "triangle", 0.05);
+  }
+
+  function updateShards(dt) {
+    const b = state.boss;
+    if (!b) return false;
+    for (const s of b.shards) {
+      s.flash = Math.max(0, s.flash - dt * 6);
+      if (s.dead) continue;
+      if (iceCovers(s.a)) continue;
+      s.r -= s.spd * dt;
+      if (s.r <= DEATH_R) {
+        endCredit("death");
+        return true;
+      }
+    }
+    b.shards = b.shards.filter((s) => !s.dead || s.flash > 0);
+    return false;
+  }
+
+  function updateBoss(dt) {
+    const b = state.boss;
+    if (!b) return;
+    b.flash = Math.max(0, b.flash - dt * 5);
+    b.wobble += dt * 7;
+    if (b.dead) {
+      b.clearT -= dt;
+      b.r += (RING_R - 8 - b.r) * Math.min(1, dt * 5);
+      return;
+    }
+    const frozen = iceCovers(b.a);
+    if (updateShards(dt)) return;
+    if (b.phase === "orbit") {
+      if (!frozen) {
+        b.a = angNorm(b.a + BOSS_ORBIT * b.orbitDir * dt);
+        b.r += (RING_R - 6 - b.r) * Math.min(1, dt * 5);
+        b.nextAtk -= dt;
+      }
+      if (b.nextAtk <= 0) startBossAtk(b);
+    } else if (b.phase === "windup_lunge") {
+      b.phaseT += frozen ? dt * 0.25 : dt;
+      b.telA = b.a;
+      b.telFill = clamp(b.phaseT / LUNGE_WIND_S, 0, 1);
+      if (b.phaseT >= LUNGE_WIND_S) {
+        b.phase = "lunge";
+        b.phaseT = 0;
+        beep(70, 0.18, "sawtooth", 0.06);
+        beep(280, 0.08, "square", 0.04);
+      }
+    } else if (b.phase === "lunge") {
+      b.phaseT += dt;
+      if (!frozen) b.r -= b.lungeSpd * dt;
+      if (b.r <= DEATH_R) {
+        endCredit("death");
+        return;
+      }
+      if (b.phaseT > 0.12 && b.r >= RING_R - 7) enterOrbit(b, 1.05);
+      else if (b.phaseT > 2.4) enterOrbit(b, 1.05);
+    } else if (b.phase === "windup_slam") {
+      b.phaseT += frozen ? dt * 0.25 : dt;
+      b.telFill = clamp(b.phaseT / SLAM_WIND_S, 0, 1);
+      if (!frozen) b.a = angNorm(b.a + BOSS_ORBIT * 0.35 * b.orbitDir * dt);
+      if (b.phaseT >= SLAM_WIND_S) {
+        spawnSlamShards(b);
+        b.phase = "slam";
+        b.phaseT = 0;
+      }
+    } else if (b.phase === "slam") {
+      b.phaseT += dt;
+      if (!frozen) b.a = angNorm(b.a + BOSS_ORBIT * 0.4 * b.orbitDir * dt);
+      if (b.phaseT > 1.7 && b.shards.length === 0) enterOrbit(b, 1.15);
+    }
+  }
+
+  function startBossEncounter(freshCredit) {
+    state.timeLeft = 0;
+    state.spawnAcc = 99;
+    state.pickupAcc = 99;
+    spawnBoss();
+    addPop("BOSS", CX, CY - 48, PAL.enemy, { scale: 4, life: 1.15 });
+    addPop("RIM WRAITH", CX, CY - 22, PAL.gold, { scale: 2, life: 1.15 });
+    beep(90, 0.2, "sawtooth", 0.06);
+    beep(140, 0.16, "square", 0.04);
+    if (!freshCredit) {
+      /* level-advance fanfare already played */
+    }
+  }
+
+  function startCredit() {
+    state.mode = "play";
+    state.score = 0;
+    state.steal = "";
+    state.ice = null;
+    state.boss = null;
+    if (qaStartBoss) {
+      state.level = BOSS_EVERY;
+      state.levelSpeedMul = LEVEL_CARRY_MUL ** (BOSS_EVERY - 1);
+    } else {
+      state.level = 1;
+      state.levelSpeedMul = 1;
+    }
+    beginWave(true);
+  }
+
+  function advanceLevel() {
+    state.level += 1;
+    state.levelSpeedMul *= LEVEL_CARRY_MUL;
+    beginWave(false);
+  }
+
+  function beginWave(freshCredit) {
+    state.t = 0;
+    state.timeLeft = waveLen();
+    state.spawnAcc = FIRST_EXTRA_SPAWN_S;
+    state.pickupAcc = 2.4;
+    if (freshCredit) state.aim = -Math.PI / 2;
+    state.enemies = [];
+    state.pickups = [];
+    state.gusts = [];
+    state.fx = [];
+    state.pops = [];
+    state.shake = 0;
+    state.hintT = freshCre
