@@ -1,0 +1,190 @@
+D EYE TO CHARGE", W / 2, 178, 2, PAL.gold, "center");
+    drawText("TAP WITH THE PIP", W / 2, 198, 2, PAL.gold, "center");
+    if (qaStartBoss) {
+      drawText("QA BOSS START", W / 2, H - 72, 2, PAL.gold, "center");
+    } else if (qaAssist) {
+      drawText("QA ASSIST ON", W / 2, H - 72, 2, PAL.gold, "center");
+    }
+    drawText("TAP TO START", W / 2, H - 48, 2, PAL.gold, "center");
+  }
+
+  function drawEnd() {
+    drawArena();
+    drawCone();
+    drawEye();
+    drawEnemies();
+    drawBoss();
+    const title = state.endReason === "clear" ? "WAVE CLEAR" : "EYE HIT";
+    drawText(title, W / 2, 86, 3, state.endReason === "clear" ? PAL.cyan : PAL.enemy, "center");
+    drawText(`LEVEL ${state.level}`, W / 2, 118, 2, PAL.gold, "center");
+    drawText("SCORE", W / 2, 142, 2, PAL.white, "center");
+    drawText(String(state.score).padStart(5, "0"), W / 2, 164, 4, PAL.gold, "center");
+    if (state.steal === STEAL_ID) {
+      drawText(STEAL_NAME, W / 2, 198, 2, PAL.ice, "center");
+    }
+    drawText("TAP TO RESTART", W / 2, H - 48, 2, PAL.gold, "center");
+  }
+
+  function drawPlay() {
+    const sx = (Math.random() - 0.5) * state.shake;
+    const sy = (Math.random() - 0.5) * state.shake;
+    ctx.save();
+    ctx.translate(sx, sy);
+    drawArena();
+    drawBossTel();
+    drawIce();
+    drawWedges();
+    drawCone();
+    drawGusts();
+    drawPickups();
+    drawEnemies();
+    drawBoss();
+    drawPip();
+    drawEye();
+    drawFx();
+    ctx.restore();
+    drawHud();
+    if (state.chargeT > 0) {
+      const full = state.chargeT >= CHARGE_MAX_S - 0.02;
+      const label = full ? "MAX" : chargeReady() ? "CHARGE" : "HOLD";
+      const color = full || chargeReady() ? PAL.gold : PAL.magenta;
+      drawText(label, W / 2, CY + RING_R + 14, 2, color, "center");
+    }
+    for (const p of state.pops) {
+      const pip = p.kind === "pip";
+      const rise = pip ? Math.max(0, p.t - PIP_POP_HOLD_S) * PIP_POP_RISE : p.t * 32;
+      const scale = p.scale ?? 3;
+      const y = p.y - rise;
+      if (p.outline || pip) drawTextOutlined(p.text, p.x, y, scale, p.color, "center");
+      else drawText(p.text, p.x, y, scale, p.color, "center");
+    }
+  }
+
+  function draw() {
+    ctx.imageSmoothingEnabled = false;
+    if (state.mode === "title") drawTitle();
+    else if (state.mode === "end") drawEnd();
+    else drawPlay();
+  }
+
+  function flickSpeed() {
+    const now = performance.now();
+    const windowMs = 140;
+    const recent = input.samples.filter((s) => now - s.t <= windowMs);
+    if (recent.length < 2) return 0;
+    const a = recent[0];
+    const b = recent[recent.length - 1];
+    const dt = (b.t - a.t) / 1000;
+    if (dt <= 0) return 0;
+    return Math.hypot(b.x - a.x, b.y - a.y) / dt;
+  }
+
+  function pointerDown(e) {
+    e.preventDefault();
+    ensureAudio();
+    const p = canvasPos(e);
+    const dx = p.x - CX;
+    const dy = p.y - CY;
+    const r = Math.hypot(dx, dy);
+    input.down = true;
+    input.x = input.px = p.x;
+    input.y = input.py = p.y;
+    input.fromEye = r <= EYE_R + 14;
+    input.moved = 0;
+    input.samples = [{ x: p.x, y: p.y, t: performance.now() }];
+    input.wantAim = null;
+    input.charging = false;
+
+    if (state.mode === "title" || state.mode === "end") return;
+
+    if (input.fromEye && state.chargeCd <= 0) {
+      input.charging = true;
+      state.chargeT = 0;
+    }
+
+    if (!input.fromEye && r > 20) {
+      state.aim = Math.atan2(dy, dx);
+    }
+  }
+
+  function pointerMove(e) {
+    if (!input.down) return;
+    e.preventDefault();
+    const p = canvasPos(e);
+    input.moved += Math.hypot(p.x - input.x, p.y - input.y);
+    input.x = p.x;
+    input.y = p.y;
+    input.samples.push({ x: p.x, y: p.y, t: performance.now() });
+    if (input.samples.length > 12) input.samples.shift();
+
+    if (state.mode !== "play") return;
+    if (input.charging && !chargeReady()) {
+      const leave = Math.hypot(p.x - CX, p.y - CY);
+      if (leave > EYE_R + 28 && input.moved > 18) cancelCharge();
+    }
+    if (input.fromEye && input.moved < 14 && !chargeReady()) return;
+
+    const dx = p.x - CX;
+    const dy = p.y - CY;
+    if (Math.hypot(dx, dy) > 12) {
+      const a = Math.atan2(dy, dx);
+      if (chargeReady()) input.wantAim = a;
+      else state.aim = a;
+    }
+  }
+
+  function pointerUp(e) {
+    if (!input.down) return;
+    e.preventDefault();
+    input.down = false;
+    const p = canvasPos(e);
+    const dx = p.x - CX;
+    const dy = p.y - CY;
+    const r = Math.hypot(dx, dy);
+
+    if (state.mode === "title" || state.mode === "end") {
+      startCredit();
+      return;
+    }
+
+    if (state.mode !== "play") return;
+
+    if (input.charging && chargeReady()) {
+      fireTwister();
+      return;
+    }
+
+    if (input.charging) cancelCharge();
+
+    if (input.fromEye && input.moved < 16) {
+      pulseEye();
+      return;
+    }
+
+    if (r <= EYE_R + 10 && input.moved < 16) {
+      pulseEye();
+      return;
+    }
+
+    const onMouth = r >= RING_R * 0.52;
+    const flicked = flickSpeed() >= 260;
+    const tappedMouth = onMouth && input.moved < 16;
+    if (flicked || tappedMouth) {
+      fireGust();
+    }
+  }
+
+  function pointerCancel(e) {
+    if (!input.down) return;
+    e.preventDefault();
+    cancelCharge();
+    input.down = false;
+    input.charging = false;
+    input.wantAim = null;
+  }
+
+  canvas.addEventListener("pointerdown", pointerDown);
+  canvas.addEventListener("pointermove", pointerMove);
+  window.addEventListener("pointerup", pointerUp);
+  window.addEventListener("pointercancel", pointerCancel);
+  canvas.addEventListener(

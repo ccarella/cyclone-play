@@ -1,0 +1,159 @@
+"contextmenu", (e) => e.preventDefault());
+
+  window.addEventListener("resize", resize);
+  window.visualViewport?.addEventListener("resize", resize);
+  resize();
+  resetSwirl();
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = clamp((now - last) / 1000, 0, 0.05);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  window.__cycloneMusic = {
+    play: playLevelMusic,
+    stop: fadeOutMusic,
+    cue: musicCue,
+    debug() {
+      return {
+        cue: music.current && music.current.cue,
+        outgoing: music.outgoing && music.outgoing.cue,
+        ctx: audioCtx && audioCtx.state,
+        buffers: Object.keys(music.buffers).map(Number),
+        dir: musicDir(),
+      };
+    },
+  };
+
+  window.__cycloneCharge = {
+    fire: fireTwister,
+    cancel: cancelCharge,
+    pulse: pulseEye,
+    start: startCredit,
+    die() {
+      endCredit("death");
+    },
+    nextLevel: advanceLevel,
+    steer(a) {
+      input.wantAim = a;
+    },
+    tick: tickCharge,
+    hold(seconds) {
+      if (state.mode !== "play") startCredit();
+      input.down = true;
+      input.fromEye = true;
+      input.charging = true;
+      input.moved = 0;
+      state.chargeCd = 0;
+      state.chargeT = 0;
+      tickCharge(seconds);
+    },
+    debug() {
+      return {
+        mode: state.mode,
+        score: state.score,
+        level: state.level,
+        chargeT: state.chargeT,
+        fill: chargeFill(),
+        ready: chargeReady(),
+        cd: state.chargeCd,
+        aim: state.aim,
+        enemies: state.enemies.filter((e) => !e.dead).length,
+      };
+    },
+  };
+
+  window.__cycloneBoss = {
+    every: BOSS_EVERY,
+    stealName: STEAL_NAME,
+    stealId: STEAL_ID,
+    isBossLevel,
+    start() {
+      state.mode = "play";
+      state.score = 0;
+      state.steal = "";
+      state.ice = null;
+      state.level = BOSS_EVERY;
+      state.levelSpeedMul = LEVEL_CARRY_MUL ** (BOSS_EVERY - 1);
+      beginWave(true);
+    },
+    startNormal() {
+      startCredit();
+    },
+    hit(n) {
+      return hitBoss(n ?? 1, 0);
+    },
+    kill() {
+      return hitBoss(99, 0);
+    },
+    gust: fireGust,
+    pulse: pulseEye,
+    grant: grantSteal,
+    freeze: applyFreezeSpin,
+    next: advanceLevel,
+    debug() {
+      const b = state.boss;
+      return {
+        mode: state.mode,
+        score: state.score,
+        level: state.level,
+        steal: state.steal,
+        ice: state.ice && { a: state.ice.a, t: state.ice.t, life: state.ice.life },
+        qaAssist,
+        qaStartBoss,
+        bossLevel: isBossLevel(state.level),
+        levelsToBoss: levelsToBoss(state.level),
+        boss: b && {
+          hp: b.hp,
+          maxHp: b.maxHp,
+          phase: b.phase,
+          a: b.a,
+          r: b.r,
+          telFill: b.telFill,
+          shards: b.shards.length,
+          dead: b.dead,
+          clearT: b.clearT,
+        },
+        enemies: state.enemies.filter((e) => !e.dead).map((e) => ({
+          a: e.a,
+          r: e.r,
+          frozen: iceCovers(e.a),
+        })),
+      };
+    },
+  };
+
+  window.__cyclonePip = {
+    judge: judgePip,
+    onTarget: pipOnTarget,
+    gust: fireGust,
+    pulse: pulseEye,
+    perfect: perfectStop,
+    miss: stormStutter,
+    start: startCredit,
+    debug() {
+      return {
+        mode: state.mode,
+        score: state.score,
+        level: state.level,
+        a: state.pipA,
+        wedge: state.wedgeA,
+        hit: pipOnTarget(),
+        stopT: state.stopT,
+        stutterT: state.stutterT,
+        missLockT: state.missLockT,
+        popLife: PIP_POP_S,
+        stutterS: STUTTER_S,
+        pops: state.pops
+          .filter((p) => p.kind === "pip")
+          .map((p) => ({ text: p.text, t: p.t, life: p.life })),
+        enemies: state.enemies.filter((e) => !e.dead).length,
+      };
+    },
+  };
+})();
