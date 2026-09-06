@@ -25,7 +25,7 @@ jobs:
       - name: Stage static site
         run: |
           mkdir -p _site/assets/audio/music
-          cp index.html styles.css game.js _site/
+          cp index.html styles.css game.js game.parts.json game.part*.js.txt _site/
           cp assets/audio/music/level-* _site/assets/audio/music/ || true
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
