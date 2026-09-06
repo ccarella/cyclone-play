@@ -41,6 +41,14 @@
   const STUTTER_SCALE = 0.28;
   const WEDGE_SPD = 0.72;
   const WEDGE_HALF = 0.4;
+  // Charge AC v0.6: hold eye to charge; short tap stays pulse.
+  const CHARGE_MIN_S = 0.22;
+  const CHARGE_MAX_S = 1.05;
+  const CHARGE_AIM_RATE = 2.4;
+  const CHARGE_CD_S = 0.55;
+  const CHARGE_SWIRL_MUL = 0.32;
+  const TWISTER_CONE = 1.15;
+  const TWISTER_KNOCK = 48;
   const PAL = {
     bg: "#14081c",
     arena: "#1c0c28",
@@ -83,6 +91,9 @@
     stopT: 0,
     stutterT: 0,
     pipFlash: 0,
+    chargeT: 0,
+    chargeCd: 0,
+    chargeFlash: 0,
     endReason: "",
     input: null,
   };
@@ -96,6 +107,8 @@
     fromEye: false,
     moved: 0,
     samples: [],
+    wantAim: null,
+    charging: false,
   };
 
   let audioCtx = null;
@@ -487,6 +500,85 @@
     beep(110, 0.1, "square", 0.03);
   }
 
+  function chargeFill() {
+    return clamp(state.chargeT / CHARGE_MAX_S, 0, 1);
+  }
+
+  function chargeReady() {
+    return state.chargeT >= CHARGE_MIN_S;
+  }
+
+  function chargingNow() {
+    return input.charging && input.down && state.chargeT > 0;
+  }
+
+  function cancelCharge() {
+    state.chargeT = 0;
+    input.charging = false;
+    input.wantAim = null;
+  }
+
+  function steerAim(targetA, dt) {
+    const d = angNorm(targetA - state.aim);
+    if (chargeReady()) {
+      const max = CHARGE_AIM_RATE * dt;
+      state.aim += clamp(d, -max, max);
+    } else {
+      state.aim = targetA;
+    }
+  }
+
+  function fireTwister() {
+    if (state.mode !== "play") {
+      cancelCharge();
+      return;
+    }
+    if (!chargeReady()) {
+      cancelCharge();
+      return;
+    }
+    const pipHit = pipOnTarget();
+    cancelCharge();
+    state.chargeCd = CHARGE_CD_S;
+    state.chargeFlash = 0.38;
+    state.shake = Math.max(state.shake, 7.2);
+    addFx("twister", { a: state.aim, life: 0.48 });
+    addPop("TWISTER", CX, CY - 40, PAL.gold);
+    beep(90, 0.22, "sawtooth", 0.07);
+    beep(220, 0.16, "triangle", 0.05);
+    beep(740, 0.1, "square", 0.045);
+    for (const e of state.enemies) {
+      if (e.dead) continue;
+      if (angDiff(e.a, state.aim) <= TWISTER_CONE) {
+        hitEnemy(e);
+      } else {
+        e.r = clamp(e.r + TWISTER_KNOCK, DEATH_R + 4, RING_R - 2);
+        e.flash = 0.7;
+      }
+    }
+    for (const p of state.pickups) p.pulled = true;
+    if (state.pickups.length) addPop("PULL", CX, CY - 22, PAL.gold);
+    if (pipHit) perfectStop();
+    else stormStutter();
+  }
+
+  function tickCharge(dt) {
+    if (state.mode !== "play") return;
+    if (!input.down || !input.charging || state.chargeCd > 0) return;
+    const prev = state.chargeT;
+    state.chargeT = Math.min(CHARGE_MAX_S, state.chargeT + dt);
+    const fill = chargeFill();
+    if (prev < CHARGE_MIN_S && state.chargeT >= CHARGE_MIN_S) {
+      beep(620, 0.06, "square", 0.04);
+    }
+    const step = Math.floor(state.chargeT * 8);
+    if (step !== Math.floor(prev * 8) && chargeReady()) {
+      beep(240 + fill * 520, 0.04, "square", 0.025);
+    }
+    if (input.wantAim != null) steerAim(input.wantAim, dt);
+    if (state.chargeT >= CHARGE_MAX_S) fireTwister();
+  }
+
   function resetSwirl() {
     state.swirl = [];
     for (let i = 0; i < 18; i++) {
@@ -530,6 +622,9 @@
     state.stopT = 0;
     state.stutterT = 0;
     state.pipFlash = 0;
+    cancelCharge();
+    state.chargeCd = 0;
+    state.chargeFlash = 0;
     state.endReason = "";
     resetSwirl();
     const firstA = freshCredit ? -Math.PI / 2 : state.aim;
@@ -557,9 +652,14 @@
       beep(660, 0.16, "square", 0.05);
     }
     playLevelMusic(state.level);
+    if (input.down && input.fromEye && state.chargeCd <= 0) {
+      input.charging = true;
+      state.chargeT = 0;
+    }
   }
 
   function endCredit(reason) {
+    cancelCharge();
     state.mode = "end";
     state.endReason = reason;
     state.shake = 6;
@@ -695,7 +795,10 @@
     state.hintT = Math.max(0, state.hintT - stormDt);
     state.pulseCd = Math.max(0, state.pulseCd - stormDt);
     state.gustCd = Math.max(0, state.gustCd - stormDt);
+    state.chargeCd = Math.max(0, state.chargeCd - stormDt);
+    state.chargeFlash = Math.max(0, state.chargeFlash - dt * 2.4);
     state.shake *= Math.pow(0.04, stormDt);
+    tickCharge(dt);
 
     if (state.timeLeft <= 0) {
       state.timeLeft = 0;
@@ -715,8 +818,9 @@
       state.pickupAcc = rand(9, 14);
     }
 
+    const swirlMul = chargeReady() ? CHARGE_SWIRL_MUL : 1;
     for (const s of state.swirl) {
-      s.a += s.s * stormDt;
+      s.a += s.s * stormDt * swirlMul;
     }
 
     for (const e of state.enemies) {
@@ -866,7 +970,8 @@
   function drawCone() {
     const a0 = state.aim - CONE_HALF;
     const a1 = state.aim + CONE_HALF;
-    ctx.fillStyle = "rgba(60,243,255,0.14)";
+    const charged = chargeReady();
+    ctx.fillStyle = charged ? "rgba(255,216,74,0.16)" : "rgba(60,243,255,0.14)";
     ctx.beginPath();
     ctx.moveTo(CX, CY);
     ctx.arc(CX, CY, RING_R - 1, a0, a1);
@@ -879,7 +984,7 @@
     ctx.arc(CX, CY, RING_R - 1, a0, a1);
     ctx.stroke();
 
-    ctx.strokeStyle = PAL.cyan;
+    ctx.strokeStyle = charged ? PAL.gold : PAL.cyan;
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.arc(CX, CY, RING_R, a0, a1);
@@ -912,10 +1017,36 @@
     ctx.arc(CX, CY, EYE_R - 2, 0, Math.PI * 2);
     ctx.fill();
 
+    const fill = chargeFill();
+    const ready = chargeReady();
     ctx.fillStyle = PAL.white;
     ctx.beginPath();
     ctx.arc(CX, CY, EYE_R - 6, 0, Math.PI * 2);
     ctx.fill();
+
+    if (fill > 0 || state.chargeFlash > 0) {
+      const glow = ready ? PAL.gold : PAL.magenta;
+      ctx.strokeStyle = glow;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(CX, CY, EYE_R + 9, -Math.PI / 2, -Math.PI / 2 + fill * Math.PI * 2);
+      ctx.stroke();
+      if (ready) {
+        ctx.strokeStyle = "rgba(255,216,74,0.35)";
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 13, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    if (state.chargeFlash > 0) {
+      const k = state.chargeFlash / 0.38;
+      ctx.strokeStyle = `rgba(255,216,74,${0.85 * k})`;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(CX, CY, EYE_R + 8 + (1 - k) * 22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     const [px, py] = polar(state.aim, 4);
     ctx.fillStyle = PAL.ink;
@@ -1015,6 +1146,30 @@
         ctx.beginPath();
         ctx.arc(CX, CY, RING_R - 10, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (f.kind === "twister") {
+        const a0 = f.a - TWISTER_CONE;
+        const a1 = f.a + TWISTER_CONE;
+        ctx.fillStyle = `rgba(255,216,74,${0.16 * k})`;
+        ctx.beginPath();
+        ctx.moveTo(CX, CY);
+        ctx.arc(CX, CY, RING_R + 4, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255,216,74,${0.95 * k})`;
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 14 + f.t * 240, a0, a1);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(244,241,232,${k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(CX, CY, EYE_R + 28 + f.t * 200, a0 + 0.12, a1 - 0.12);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255,60,172,${0.7 * k})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R - 6, a0, a1);
+        ctx.stroke();
       }
     }
   }
@@ -1036,7 +1191,8 @@
         drawText("DRAG RING TO AIM", W / 2, hy, 1, c, "center");
         drawText("FLICK OR TAP MOUTH", W / 2, hy + 12, 1, c, "center");
         drawText("TAP EYE TO PULSE", W / 2, hy + 24, 1, c, "center");
-        drawText("TAP WITH THE PIP", W / 2, hy + 36, 1, c, "center");
+        drawText("HOLD EYE TO CHARGE", W / 2, hy + 36, 1, c, "center");
+        drawText("TAP WITH THE PIP", W / 2, hy + 48, 1, c, "center");
       }
     }
   }
@@ -1050,7 +1206,8 @@
     drawText("DRAG RING TO AIM", W / 2, 118, 2, PAL.white, "center");
     drawText("FLICK OR TAP MOUTH", W / 2, 138, 2, PAL.white, "center");
     drawText("TAP EYE TO PULSE", W / 2, 158, 2, PAL.white, "center");
-    drawText("TAP WITH THE PIP", W / 2, 178, 2, PAL.gold, "center");
+    drawText("HOLD EYE TO CHARGE", W / 2, 178, 2, PAL.gold, "center");
+    drawText("TAP WITH THE PIP", W / 2, 198, 2, PAL.gold, "center");
     if (qaAssist) {
       drawText("QA ASSIST ON", W / 2, H - 72, 2, PAL.gold, "center");
     }
@@ -1086,6 +1243,12 @@
     drawFx();
     ctx.restore();
     drawHud();
+    if (state.chargeT > 0) {
+      const full = state.chargeT >= CHARGE_MAX_S - 0.02;
+      const label = full ? "MAX" : chargeReady() ? "CHARGE" : "HOLD";
+      const color = full || chargeReady() ? PAL.gold : PAL.magenta;
+      drawText(label, W / 2, CY + RING_R + 14, 2, color, "center");
+    }
     for (const p of state.pops) {
       drawText(p.text, p.x, p.y - p.t * 32, 3, p.color, "center");
     }
@@ -1123,8 +1286,15 @@
     input.fromEye = r <= EYE_R + 14;
     input.moved = 0;
     input.samples = [{ x: p.x, y: p.y, t: performance.now() }];
+    input.wantAim = null;
+    input.charging = false;
 
     if (state.mode === "title" || state.mode === "end") return;
+
+    if (input.fromEye && state.chargeCd <= 0) {
+      input.charging = true;
+      state.chargeT = 0;
+    }
 
     if (!input.fromEye && r > 20) {
       state.aim = Math.atan2(dy, dx);
@@ -1142,12 +1312,18 @@
     if (input.samples.length > 12) input.samples.shift();
 
     if (state.mode !== "play") return;
-    if (input.fromEye && input.moved < 14) return;
+    if (input.charging && !chargeReady()) {
+      const leave = Math.hypot(p.x - CX, p.y - CY);
+      if (leave > EYE_R + 28 && input.moved > 18) cancelCharge();
+    }
+    if (input.fromEye && input.moved < 14 && !chargeReady()) return;
 
     const dx = p.x - CX;
     const dy = p.y - CY;
     if (Math.hypot(dx, dy) > 12) {
-      state.aim = Math.atan2(dy, dx);
+      const a = Math.atan2(dy, dx);
+      if (chargeReady()) input.wantAim = a;
+      else state.aim = a;
     }
   }
 
@@ -1167,6 +1343,13 @@
 
     if (state.mode !== "play") return;
 
+    if (input.charging && chargeReady()) {
+      fireTwister();
+      return;
+    }
+
+    if (input.charging) cancelCharge();
+
     if (input.fromEye && input.moved < 16) {
       pulseEye();
       return;
@@ -1185,10 +1368,19 @@
     }
   }
 
+  function pointerCancel(e) {
+    if (!input.down) return;
+    e.preventDefault();
+    cancelCharge();
+    input.down = false;
+    input.charging = false;
+    input.wantAim = null;
+  }
+
   canvas.addEventListener("pointerdown", pointerDown);
   canvas.addEventListener("pointermove", pointerMove);
   window.addEventListener("pointerup", pointerUp);
-  window.addEventListener("pointercancel", pointerUp);
+  window.addEventListener("pointercancel", pointerCancel);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
   window.addEventListener("resize", resize);
@@ -1217,6 +1409,44 @@
         ctx: audioCtx && audioCtx.state,
         buffers: Object.keys(music.buffers).map(Number),
         dir: musicDir(),
+      };
+    },
+  };
+
+  window.__cycloneCharge = {
+    fire: fireTwister,
+    cancel: cancelCharge,
+    pulse: pulseEye,
+    start: startCredit,
+    die() {
+      endCredit("death");
+    },
+    nextLevel: advanceLevel,
+    steer(a) {
+      input.wantAim = a;
+    },
+    tick: tickCharge,
+    hold(seconds) {
+      if (state.mode !== "play") startCredit();
+      input.down = true;
+      input.fromEye = true;
+      input.charging = true;
+      input.moved = 0;
+      state.chargeCd = 0;
+      state.chargeT = 0;
+      tickCharge(seconds);
+    },
+    debug() {
+      return {
+        mode: state.mode,
+        score: state.score,
+        level: state.level,
+        chargeT: state.chargeT,
+        fill: chargeFill(),
+        ready: chargeReady(),
+        cd: state.chargeCd,
+        aim: state.aim,
+        enemies: state.enemies.filter((e) => !e.dead).length,
       };
     },
   };
