@@ -41,6 +41,11 @@
   const STUTTER_SCALE = 0.28;
   const WEDGE_SPD = 0.72;
   const WEDGE_HALF = 0.4;
+  // Pip polish AC v0.5.1: linger / hot-window / no miss-stack. Rules unchanged.
+  const PIP_POP_S = 0.92;
+  const PIP_POP_HOLD_S = 0.28;
+  const PIP_POP_RISE = 12;
+  const MISS_LOCK_S = 0.85;
   // Charge AC v0.6: hold eye to charge; short tap stays pulse.
   const CHARGE_MIN_S = 0.22;
   const CHARGE_MAX_S = 1.05;
@@ -90,6 +95,7 @@
     wedgeA: Math.PI / 2,
     stopT: 0,
     stutterT: 0,
+    missLockT: 0,
     pipFlash: 0,
     chargeT: 0,
     chargeCd: 0,
@@ -458,8 +464,48 @@
     state.fx.push({ kind, t: 0, life: extra.life ?? 0.35, ...extra });
   }
 
-  function addPop(text, x, y, color) {
-    state.pops.push({ text, x, y, t: 0, color });
+  function addPop(text, x, y, color, extra) {
+    state.pops.push({
+      text,
+      x,
+      y,
+      t: 0,
+      color,
+      life: extra?.life ?? 1.05,
+      scale: extra?.scale ?? 3,
+      kind: extra?.kind ?? "",
+      outline: extra?.outline ?? false,
+    });
+  }
+
+  function addPipPop(text, x, y, color) {
+    state.pops = state.pops.filter((p) => !(p.kind === "pip" && p.text === text));
+    addPop(text, x, y, color, {
+      kind: "pip",
+      life: PIP_POP_S,
+      scale: 3,
+      outline: true,
+    });
+  }
+
+  function drawTextOutlined(text, x, y, scale, color, align) {
+    for (const [ox, oy] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      drawText(text, x + ox, y + oy, scale, PAL.ink, align);
+    }
+    drawText(text, x, y, scale, color, align);
+  }
+
+  function hotPulse() {
+    return 0.5 + 0.5 * Math.sin((performance.now() / 1000) * Math.PI * 8);
   }
 
   function pipOnTarget() {
@@ -479,11 +525,13 @@
   function perfectStop() {
     state.stopT = PIP_STOP_S;
     state.stutterT = 0;
+    state.missLockT = 0;
     state.pipFlash = 1;
     state.score += PIP_BONUS;
+    state.pops = state.pops.filter((p) => !(p.kind === "pip" && p.text === "MISS"));
     const [px, py] = polar(state.pipA, RING_R);
-    addPop("PERFECT", CX, CY - 48, PAL.gold);
-    addPop(`+${PIP_BONUS}`, px, py - 10, PAL.gold);
+    addPipPop("PERFECT", CX, CY - 48, PAL.gold);
+    addPipPop(`+${PIP_BONUS}`, px, py - 10, PAL.gold);
     addFx("pip", { a: state.pipA, r: RING_R, color: PAL.gold, life: 0.32 });
     state.shake = Math.max(state.shake, 2.2);
     beep(980, 0.07, "square", 0.05);
@@ -491,9 +539,11 @@
   }
 
   function stormStutter() {
+    if (state.stutterT > 0 || state.missLockT > 0) return;
     state.stutterT = STUTTER_S;
+    state.missLockT = MISS_LOCK_S;
     state.pipFlash = 0.45;
-    addPop("MISS", CX, CY - 48, PAL.enemy);
+    addPipPop("MISS", CX, CY - 48, PAL.enemy);
     addFx("stutter", { life: 0.22 });
     state.shake = Math.max(state.shake, 4.2);
     beep(70, 0.14, "sawtooth", 0.055);
@@ -621,6 +671,7 @@
     state.gustCd = 0;
     state.stopT = 0;
     state.stutterT = 0;
+    state.missLockT = 0;
     state.pipFlash = 0;
     cancelCharge();
     state.chargeCd = 0;
@@ -785,6 +836,7 @@
   function updatePlay(dt) {
     state.stopT = Math.max(0, state.stopT - dt);
     state.stutterT = Math.max(0, state.stutterT - dt);
+    state.missLockT = Math.max(0, state.missLockT - dt);
     state.pipFlash = Math.max(0, state.pipFlash - dt * 3.2);
     if (state.stopT <= 0) state.pipA += PIP_SPD * dt;
     state.wedgeA += WEDGE_SPD * dt;
@@ -861,7 +913,7 @@
     for (const f of state.fx) f.t += stormDt;
     state.fx = state.fx.filter((f) => f.t < f.life);
     for (const p of state.pops) p.t += dt;
-    state.pops = state.pops.filter((p) => p.t < 1.05);
+    state.pops = state.pops.filter((p) => p.t < (p.life ?? 1.05));
   }
 
   function update(dt) {
@@ -921,15 +973,33 @@
 
   function drawWedges() {
     const hot = pipOnTarget();
-    ctx.strokeStyle = hot && angDiff(state.pipA, state.wedgeA) <= WEDGE_HALF
-      ? "rgba(255,216,74,0.95)"
-      : "rgba(255,216,74,0.55)";
-    ctx.lineWidth = 7;
-    ctx.beginPath();
-    ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
-    ctx.stroke();
+    const pulse = hotPulse();
+    const onWedge = angDiff(state.pipA, state.wedgeA) <= WEDGE_HALF;
+    if (hot && onWedge) {
+      ctx.strokeStyle = `rgba(255,216,74,${0.28 + 0.42 * pulse})`;
+      ctx.lineWidth = 18;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,230,1)";
+      ctx.lineWidth = 11;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+      ctx.strokeStyle = PAL.gold;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = "rgba(255,216,74,0.55)";
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(CX, CY, RING_R, state.wedgeA - WEDGE_HALF, state.wedgeA + WEDGE_HALF);
+      ctx.stroke();
+    }
     ctx.strokeStyle = PAL.white;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = hot && onWedge ? 3 : 2;
     ctx.beginPath();
     ctx.arc(CX, CY, RING_R + 4, state.wedgeA - WEDGE_HALF * 0.7, state.wedgeA + WEDGE_HALF * 0.7);
     ctx.stroke();
@@ -937,28 +1007,56 @@
     for (const e of state.enemies) {
       if (e.dead) continue;
       const on = angDiff(state.pipA, e.a) <= PIP_HIT;
-      ctx.strokeStyle = on ? "rgba(255,77,109,0.95)" : "rgba(255,77,109,0.42)";
-      ctx.lineWidth = on ? 6 : 4;
-      ctx.beginPath();
-      ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
-      ctx.stroke();
+      if (on) {
+        ctx.strokeStyle = `rgba(255,77,109,${0.5 + 0.5 * pulse})`;
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255,230,236,1)";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "rgba(255,77,109,0.42)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(CX, CY, RING_R, e.a - PIP_HIT * 0.7, e.a + PIP_HIT * 0.7);
+        ctx.stroke();
+      }
     }
   }
 
   function drawPip() {
     const hot = pipOnTarget();
     const flash = state.pipFlash;
+    const pulse = hot ? hotPulse() : 0;
     const trailN = 6;
     for (let i = trailN; i >= 1; i--) {
       const a = state.pipA - i * 0.09;
       const [tx, ty] = polar(a, RING_R);
-      const fade = (1 - i / (trailN + 1)) * 0.55;
-      ctx.fillStyle = `rgba(60,243,255,${fade})`;
+      const fade = (1 - i / (trailN + 1)) * (hot ? 0.85 : 0.55);
+      ctx.fillStyle = hot
+        ? `rgba(255,216,74,${fade})`
+        : `rgba(60,243,255,${fade})`;
       ctx.fillRect(Math.round(tx) - 1, Math.round(ty) - 1, 3, 3);
     }
     const [x, y] = polar(state.pipA, RING_R);
-    const grow = hot || flash > 0 ? 2 : 0;
-    const s = 5 + grow + (flash > 0 ? 1 : 0);
+    if (hot) {
+      ctx.strokeStyle = `rgba(255,216,74,${0.55 + 0.4 * pulse})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, 11 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,230,${0.75 + 0.25 * pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 7 + pulse * 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const grow = hot ? 4 : flash > 0 ? 2 : 0;
+    const s = 5 + grow + (flash > 0 ? 1 : 0) + (hot ? Math.round(pulse) : 0);
     ctx.fillStyle = PAL.white;
     ctx.fillRect(Math.round(x - s), Math.round(y - s), s * 2, s * 2);
     ctx.fillStyle = hot || flash > 0.2 ? PAL.gold : PAL.cyan;
@@ -1068,10 +1166,16 @@
     for (const e of state.enemies) {
       const [x, y] = polar(e.a, e.r);
       const j = Math.sin(e.wobble) * 1.2;
-      const s = 5;
-      ctx.fillStyle = e.flash > 0 || e.dead ? PAL.white : PAL.enemy;
+      const onPip = !e.dead && angDiff(state.pipA, e.a) <= PIP_HIT;
+      const pulse = onPip ? hotPulse() : 0;
+      const s = onPip ? 6 + Math.round(pulse) : 5;
+      if (onPip) {
+        ctx.fillStyle = PAL.gold;
+        ctx.fillRect(Math.round(x - s - 2 + j), Math.round(y - s - 2), s * 2 + 4, s * 2 + 4);
+      }
+      ctx.fillStyle = e.flash > 0 || e.dead || onPip ? PAL.white : PAL.enemy;
       ctx.fillRect(Math.round(x - s + j), Math.round(y - s), s * 2, s * 2);
-      ctx.fillStyle = e.flash > 0 || e.dead ? PAL.white : PAL.magenta;
+      ctx.fillStyle = e.flash > 0 || e.dead ? PAL.white : onPip ? PAL.gold : PAL.magenta;
       ctx.fillRect(Math.round(x - 2), Math.round(y - 2), 4, 4);
     }
   }
@@ -1250,7 +1354,12 @@
       drawText(label, W / 2, CY + RING_R + 14, 2, color, "center");
     }
     for (const p of state.pops) {
-      drawText(p.text, p.x, p.y - p.t * 32, 3, p.color, "center");
+      const pip = p.kind === "pip";
+      const rise = pip ? Math.max(0, p.t - PIP_POP_HOLD_S) * PIP_POP_RISE : p.t * 32;
+      const scale = p.scale ?? 3;
+      const y = p.y - rise;
+      if (p.outline || pip) drawTextOutlined(p.text, p.x, y, scale, p.color, "center");
+      else drawText(p.text, p.x, y, scale, p.color, "center");
     }
   }
 
@@ -1456,6 +1565,8 @@
     onTarget: pipOnTarget,
     gust: fireGust,
     pulse: pulseEye,
+    perfect: perfectStop,
+    miss: stormStutter,
     start: startCredit,
     debug() {
       return {
@@ -1467,6 +1578,12 @@
         hit: pipOnTarget(),
         stopT: state.stopT,
         stutterT: state.stutterT,
+        missLockT: state.missLockT,
+        popLife: PIP_POP_S,
+        stutterS: STUTTER_S,
+        pops: state.pops
+          .filter((p) => p.kind === "pip")
+          .map((p) => ({ text: p.text, t: p.t, life: p.life })),
         enemies: state.enemies.filter((e) => !e.dead).length,
       };
     },
