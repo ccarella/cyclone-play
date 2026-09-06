@@ -1,0 +1,196 @@
+   x: ((e.clientX - rect.left) / rect.width) * W,
+      y: ((e.clientY - rect.top) / rect.height) * H,
+    };
+  }
+
+  function angNorm(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  function angDiff(a, b) {
+    return Math.abs(angNorm(a - b));
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+
+  function qaParamOn(raw) {
+    const v = String(raw ?? "").toLowerCase();
+    return v === "1" || v === "true" || v === "on" || v === "yes";
+  }
+
+  function qaSources() {
+    const search = window.location.search || "";
+    const hash = (window.location.hash || "").replace(/^#/, "");
+    const sources = [search, hash];
+    const lastQ = search.lastIndexOf("?");
+    if (lastQ > 0) sources.push(search.slice(lastQ));
+    return sources;
+  }
+
+  function readQaFlags() {
+    let assist = !!QA_ASSIST;
+    let startBoss = false;
+    for (const src of qaSources()) {
+      try {
+        const q = src.startsWith("?") ? src.slice(1) : src;
+        const p = new URLSearchParams(q);
+        const qa = p.get("qa");
+        if (qaParamOn(qa)) assist = true;
+        if (String(qa || "").toLowerCase() === "boss") {
+          assist = true;
+          startBoss = true;
+        }
+        if (qaParamOn(p.get("boss")) && assist) startBoss = true;
+      } catch {
+        /* ignore bad query */
+      }
+    }
+    return { assist, startBoss };
+  }
+
+  const qaFlags = readQaFlags();
+  const qaAssist = qaFlags.assist;
+  const qaStartBoss = qaFlags.startBoss;
+
+  function waveLen() {
+    return qaAssist ? QA_WAVE_S : WAVE_S;
+  }
+
+  function rand(a, b) {
+    return a + Math.random() * (b - a);
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    preloadMusic();
+  }
+
+  function beep(freq, dur, type, gain) {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || "square";
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(gain ?? 0.05, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(t0);
+    o.stop(t0 + dur);
+  }
+
+  function musicCue(level) {
+    return clamp(level | 0, 1, MUSIC_MAX_CUE);
+  }
+
+  function musicDir() {
+    const attr = document.documentElement.getAttribute("data-music-base");
+    if (attr) return attr.replace(/\/$/, "");
+    if (/htmlpreview\.github\.io$/i.test(location.hostname)) {
+      return "https://raw.githubusercontent.com/ccarella/cyclone-play/main/assets/audio/music";
+    }
+    return "assets/audio/music";
+  }
+
+  function decodeAudio(ctx, data) {
+    return new Promise((resolve, reject) => {
+      const copy = data.slice(0);
+      let settled = false;
+      const ok = (buf) => {
+        if (settled) return;
+        settled = true;
+        resolve(buf);
+      };
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err || new Error("decode failed"));
+      };
+      try {
+        const p = ctx.decodeAudioData(copy, ok, fail);
+        if (p && typeof p.then === "function") p.then(ok, fail);
+      } catch (err) {
+        fail(err);
+      }
+    });
+  }
+
+  function loadMusicCue(cue) {
+    if (music.buffers[cue]) return Promise.resolve(music.buffers[cue]);
+    if (music.loads[cue]) return music.loads[cue];
+    music.loads[cue] = (async () => {
+      if (!audioCtx) return null;
+      const base = musicDir();
+      const urls = [`${base}/level-${cue}.ogg`, `${base}/level-${cue}.mp3`];
+      for (const url of urls) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const buf = await decodeAudio(audioCtx, await res.arrayBuffer());
+          music.buffers[cue] = buf;
+          return buf;
+        } catch (_) {
+          /* try the next container */
+        }
+      }
+      try {
+        const specRes = await fetch(`${base}/level-${cue}.parts.json`);
+        if (!specRes.ok) return null;
+        const spec = await specRes.json();
+        const pieces = await Promise.all(
+          spec.parts.map(async (name) => {
+            const part = await fetch(`${base}/${name}`);
+            if (!part.ok) throw new Error("part");
+            return part.text();
+          })
+        );
+        const b64 = pieces.join("").replace(/\s+/g, "");
+        const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const buf = await decodeAudio(audioCtx, raw.buffer);
+        music.buffers[cue] = buf;
+        return buf;
+      } catch (_) {
+        return null;
+      }
+    })();
+    return music.loads[cue];
+  }
+
+  function preloadMusic() {
+    if (!audioCtx) return;
+    for (let cue = 1; cue <= MUSIC_MAX_CUE; cue++) loadMusicCue(cue);
+  }
+
+  function disconnectBed(bed) {
+    if (!bed) return;
+    try {
+      bed.source.onended = null;
+      bed.source.stop();
+    } catch (_) {}
+    try {
+      bed.source.disconnect();
+    } catch (_) {}
+    try {
+      bed.gain.disconnect();
+    } catch (_) {}
+  }
+
+  function makeBed(buffer, gainValue) {
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(gainValue, a

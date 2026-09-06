@@ -7,9 +7,76 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#14081c" />
 <title>CYCLONE</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #14081c;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #14081c;
+  touch-action: none;
+}
+
+</style>
 </head>
 <body>
 <main id="frame"><canvas id="game" width="270" height="480" aria-label="Cyclone"></canvas></main>
-<script src="game.js"></script>
+<script>
+(async () => {
+  const host = location.hostname;
+  const base = /htmlpreview\.github\.io$/i.test(host)
+    ? "https://raw.githubusercontent.com/ccarella/cyclone-play/main"
+    : ".";
+  const spec = await fetch(base + "/game.parts.json").then((r) => r.json());
+  const pieces = await Promise.all(
+    spec.parts.map((n) => fetch(base + "/" + n).then((r) => r.text()))
+  );
+  const s = document.createElement("script");
+  s.textContent = pieces.join("");
+  document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>
